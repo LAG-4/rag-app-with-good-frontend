@@ -11,41 +11,36 @@ interface Message {
 }
 
 export default function Home() {
-  const [file, setFile] = useState<File | null>(null);
-  const [summary, setSummary] = useState<string>('');
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleFileUpload = async (uploadedFile: File) => {
+  const handleFileUpload = async (file: File) => {
     setIsLoading(true);
-    setFile(uploadedFile);
-
-    const formData = new FormData();
-    formData.append('file', uploadedFile);
+    setError(null);
 
     try {
+      const formData = new FormData();
+      formData.append('file', file);
+
       const response = await fetch('/api/upload', {
         method: 'POST',
         body: formData,
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Upload failed');
+        throw new Error(`Upload failed: ${response.statusText}`);
       }
 
       const data = await response.json();
-      setSummary(data.summary);
-      setMessages([{
-        role: 'assistant',
-        content: `I've analyzed your document. Here's a summary:\n\n${data.summary}\n\nFeel free to ask any questions about the content!`
-      }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: data.summary }]);
     } catch (error) {
-      console.error('Error:', error);
-      setMessages([{
-        role: 'assistant',
-        content: error instanceof Error ? error.message : 'Sorry, there was an error processing your file. Please try again.'
-      }]);
+      console.error('Upload error:', error);
+      if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError('Failed to upload file. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -53,9 +48,11 @@ export default function Home() {
 
   const handleSendMessage = async (message: string) => {
     setIsLoading(true);
-    setMessages(prev => [...prev, { role: 'user', content: message }]);
+    setError(null);
 
     try {
+      setMessages(prev => [...prev, { role: 'user', content: message }]);
+
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: {
@@ -65,17 +62,20 @@ export default function Home() {
       });
 
       if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Chat request failed');
+        throw new Error(`Chat failed: ${response.statusText}`);
       }
 
       const data = await response.json();
-      setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: data.message }]);
     } catch (error) {
-      console.error('Error:', error);
+      console.error('Chat error:', error);
       // Remove the user's message if the request failed
       setMessages(prev => prev.slice(0, -1));
-      throw error; // Re-throw to let the Chat component handle the error UI
+      if (error instanceof Error) {
+        setError(error.message);
+      } else {
+        setError('Failed to send message. Please try again.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -98,15 +98,8 @@ export default function Home() {
           <div className="space-y-6">
             <div className="bg-[#242424] rounded-lg shadow-lg p-6 border border-gray-800">
               <h2 className="text-lg font-semibold mb-4 text-white">Upload Document</h2>
-              <FileUpload onFileUpload={handleFileUpload} />
+              <FileUpload onUpload={handleFileUpload} isLoading={isLoading} error={error} />
             </div>
-
-            {summary && (
-              <div className="bg-[#242424] rounded-lg shadow-lg p-6 border border-gray-800">
-                <h2 className="text-lg font-semibold mb-4 text-white">Document Summary</h2>
-                <p className="text-gray-300 whitespace-pre-wrap">{summary}</p>
-              </div>
-            )}
           </div>
 
           <div className="bg-[#242424] rounded-lg shadow-lg p-6 h-[600px] relative border border-gray-800">

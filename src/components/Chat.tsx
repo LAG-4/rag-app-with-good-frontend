@@ -67,7 +67,6 @@ export function Chat({ onSendMessage, messages, isLoading }: ChatProps) {
                         const match = /language-(\w+)/.exec(className || '');
                         return match ? (
                           <SyntaxHighlighter
-                            // @ts-ignore
                             style={vscDarkPlus}
                             language={match[1]}
                             PreTag="div"
