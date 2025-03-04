@@ -6,14 +6,14 @@ import { ChatPromptTemplate } from '@langchain/core/prompts';
 // Initialize Groq Chat Model
 const model = new ChatGroq({
   apiKey: process.env.GROQ_API_KEY,
-  model: "llama2-70b-4096",  // Using Llama 3 70B model
+  model: "llama-3.3-70b-versatile",
   temperature: 0.7,
-  maxTokens: 4096,
+  maxTokens: 2048,
 });
 
 // Create a prompt template for chat
 const chatPrompt = ChatPromptTemplate.fromMessages([
-  ["system", "You are a helpful assistant that answers questions about documents. Provide clear, detailed, and accurate answers based on the context provided. If you're unsure about something, please say so."],
+  ["system", "You are a helpful assistant. Provide clear and concise answers."],
   ["human", "{message}"]
 ]);
 
@@ -22,9 +22,49 @@ const chatChain = chatPrompt
   .pipe(model)
   .pipe(new StringOutputParser());
 
+interface GroqError extends Error {
+  status?: number;
+}
+
+// Add delay between API calls
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function processMessageWithRetry(message: string, retries = 3): Promise<string> {
+  try {
+    // Add delay to respect rate limits
+    await delay(1000);
+
+    const response = await chatChain.invoke({
+      message: message,
+    });
+
+    return response;
+  } catch (error) {
+    const groqError = error as GroqError;
+    
+    if (retries > 0) {
+      if (groqError.status === 413) {
+        // If message is too long, try with a shorter version
+        const truncatedMessage = message.slice(0, 1500); // Truncate to 1500 characters
+        console.log('Message too long, retrying with truncated version...');
+        await delay(2000); // Wait before retry
+        return processMessageWithRetry(truncatedMessage, retries - 1);
+      } else {
+        // For other errors, wait and retry
+        console.log('Error occurred, retrying...');
+        await delay(2000);
+        return processMessageWithRetry(message, retries - 1);
+      }
+    }
+    
+    throw error;
+  }
+}
+
 export async function POST(request: Request) {
   try {
-    const { message } = await request.json();
+    const body = await request.json();
+    const { message } = body;
 
     if (!message) {
       return NextResponse.json(
@@ -33,17 +73,35 @@ export async function POST(request: Request) {
       );
     }
 
-    // Process the message using LangChain and Groq
-    const response = await chatChain.invoke({
-      message: message,
-    });
+    // Process the message with retry logic
+    const response = await processMessageWithRetry(message);
 
-    return NextResponse.json({ response });
+    return NextResponse.json({ 
+      response,
+      status: 'success'
+    });
   } catch (error) {
     console.error('Error in chat:', error);
+    
+    // Provide more specific error messages
+    let errorMessage = 'Error processing chat request';
+    let statusCode = 500;
+
+    const groqError = error as GroqError;
+    if (groqError.status === 413) {
+      errorMessage = 'Message too long. Please try a shorter message.';
+      statusCode = 413;
+    } else if (groqError.status === 429) {
+      errorMessage = 'Too many requests. Please wait a moment and try again.';
+      statusCode = 429;
+    }
+
     return NextResponse.json(
-      { error: 'Error processing chat request' },
-      { status: 500 }
+      { 
+        error: errorMessage,
+        status: 'error'
+      },
+      { status: statusCode }
     );
   }
 } 

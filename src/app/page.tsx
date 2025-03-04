@@ -29,7 +29,10 @@ export default function Home() {
         body: formData,
       });
 
-      if (!response.ok) throw new Error('Upload failed');
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Upload failed');
+      }
 
       const data = await response.json();
       setSummary(data.summary);
@@ -41,7 +44,7 @@ export default function Home() {
       console.error('Error:', error);
       setMessages([{
         role: 'assistant',
-        content: 'Sorry, there was an error processing your file. Please try again.'
+        content: error instanceof Error ? error.message : 'Sorry, there was an error processing your file. Please try again.'
       }]);
     } finally {
       setIsLoading(false);
@@ -61,16 +64,18 @@ export default function Home() {
         body: JSON.stringify({ message }),
       });
 
-      if (!response.ok) throw new Error('Chat request failed');
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Chat request failed');
+      }
 
       const data = await response.json();
       setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
     } catch (error) {
       console.error('Error:', error);
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.'
-      }]);
+      // Remove the user's message if the request failed
+      setMessages(prev => prev.slice(0, -1));
+      throw error; // Re-throw to let the Chat component handle the error UI
     } finally {
       setIsLoading(false);
     }
